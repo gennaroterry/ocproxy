@@ -37,6 +37,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <netinet/tcp.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -71,7 +72,7 @@ enum {
 #define CONN_TYPE_REDIR		0
 #define CONN_TYPE_SOCKS		1
 
-#define SOCKBUF_LEN		2048
+#define SOCKBUF_LEN		8192
 
 #define FL_ACTIVATE		1
 #define FL_DIE_ON_ERROR		2
@@ -149,7 +150,7 @@ struct socks_req {
 		} ipv4;
 		struct {
 			u8_t fqdn_len;
-			u8_t fqdn_name[255]; /* variable length */
+			u8_t fqdn_name[256]; /* variable length */
 			u16_t port;
 		} fqdn;
 	} u;
@@ -251,6 +252,11 @@ static struct ocp_sock *ocp_sock_new(int fd, event_callback_fn cb, int flags)
 		return s;
 
 	s->fd = fd;
+	/* Reduce latency for local TCP endpoints.  */
+    if (fd >= 0) {
+        int one = 1;
+        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    }
 	s->ev = event_new(event_base, fd, EV_READ, cb, s);
 	if (flags & FL_ACTIVATE)
 		event_add(s->ev, NULL);
@@ -413,7 +419,12 @@ static void socks_cmd_cb(evutil_socket_t fd, short what, void *ctx)
 		return;
 	}
 
-	ret = read(s->fd, s->sockbuf + s->sock_pos, SOCKBUF_LEN - s->sock_pos);
+    if (s->sock_pos == SOCKBUF_LEN) {
+        socks_reply(s, SOCKS_GEN_FAILURE);
+        return;
+    }
+
+    ret = read(s->fd, s->sockbuf + s->sock_pos, SOCKBUF_LEN - s->sock_pos);
 	if (ret <= 0)
 		goto disconnect;
 	s->sock_pos += ret;
@@ -460,8 +471,12 @@ static void socks_cmd_cb(evutil_socket_t fd, short what, void *ctx)
 			if (s->sock_pos <= (offsetof(struct socks_req,
 			    u.fqdn.fqdn_len) + req->u.fqdn.fqdn_len))
 				goto req_more;
-			s->rport = (name[namelen] << 8) | name[namelen + 1];
-			name[namelen] = 0;
+            if (namelen >= 255) {
+                socks_reply(s, SOCKS_ADDRNOTSUPP);
+                return;
+            }
+            s->rport = (name[namelen] << 8) | name[namelen + 1];
+            name[namelen] = 0;
 			start_resolution(s, (char *)name);
 			return;
 		} else {
@@ -575,8 +590,12 @@ static void enqueue_dns_req(struct ocp_sock *s, const char *hostname,
 		err = dns_gethostbyname(hostname, &s->rhost, found, s);
 	else {
 		/* sockbuf is just scratch space */
-		snprintf(s->sockbuf, SOCKBUF_LEN, "%s.%s", hostname, dns_domain);
-		err = dns_gethostbyname(s->sockbuf, &s->rhost, found, s);
+        int n = snprintf(s->sockbuf, SOCKBUF_LEN, "%s.%s", hostname, dns_domain);
+        if (n < 0 || n >= SOCKBUF_LEN) {
+            socks_reply(s, SOCKS_ADDRNOTSUPP);
+            return;
+        }
+        err = dns_gethostbyname(s->sockbuf, &s->rhost, found, s);
 	}
 
 	if (err == ERR_INPROGRESS)
