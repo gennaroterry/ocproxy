@@ -227,14 +227,7 @@
 #define LWIP_ASSERT_CORE_LOCKED()
 #endif
 
-/**
- * Called as first thing in the lwIP TCPIP thread. Can be used in conjunction
- * with @ref LWIP_ASSERT_CORE_LOCKED to check core locking.
- * @see @ref multithreading
- */
-#if !defined LWIP_MARK_TCPIP_THREAD || defined __DOXYGEN__
-#define LWIP_MARK_TCPIP_THREAD()
-#endif
+
 /**
  * @}
  */
@@ -252,10 +245,28 @@
 /**
  * MEM_LIBC_MALLOC==1: Use malloc/free/realloc provided by your C-library
  * instead of the lwip internal allocator. Can save code size if you
- * already use it.
+ * already use it. Specialized case of MEM_CUSTOM_ALLOCATOR.
+ * @see MEM_CUSTOM_ALLOCATOR
  */
 #if !defined MEM_LIBC_MALLOC || defined __DOXYGEN__
 #define MEM_LIBC_MALLOC                 0
+#elif MEM_LIBC_MALLOC
+#define MEM_CUSTOM_ALLOCATOR            1
+#define MEM_CUSTOM_FREE                 free
+#define MEM_CUSTOM_MALLOC               malloc
+#define MEM_CUSTOM_CALLOC               calloc
+#endif
+
+/**
+ * MEM_CUSTOM_ALLOCATOR==1: Use malloc/free/realloc provided by a custom
+ * implementation instead of the lwip internal allocator. Can save code size if
+ * you already use it. If enabled, you have to define those functions:
+ *  \#define MEM_CUSTOM_FREE   my_free
+ *  \#define MEM_CUSTOM_MALLOC my_malloc
+ *  \#define MEM_CUSTOM_CALLOC my_calloc
+ */
+#if !defined MEM_CUSTOM_ALLOCATOR || defined __DOXYGEN__
+#define MEM_CUSTOM_ALLOCATOR            0
 #endif
 
 /**
@@ -505,7 +516,7 @@
  * The number of sys timeouts used by the core stack (not apps)
  * The default number of timeouts is calculated here for all enabled modules.
  */
-#define LWIP_NUM_SYS_TIMEOUT_INTERNAL   (LWIP_TCP + IP_REASSEMBLY + LWIP_ARP + (2*LWIP_DHCP) + LWIP_AUTOIP + LWIP_IGMP + LWIP_DNS + PPP_NUM_TIMEOUTS + (LWIP_IPV6 * (1 + LWIP_IPV6_REASS + LWIP_IPV6_MLD)))
+#define LWIP_NUM_SYS_TIMEOUT_INTERNAL   (LWIP_TCP + IP_REASSEMBLY + LWIP_ARP + (2*LWIP_DHCP) + LWIP_ACD + LWIP_IGMP + LWIP_DNS + PPP_NUM_TIMEOUTS + (LWIP_IPV6 * (1 + LWIP_IPV6_REASS + LWIP_IPV6_MLD + LWIP_IPV6_DHCP6)))
 
 /**
  * MEMP_NUM_SYS_TIMEOUT: the number of simultaneously active timeouts.
@@ -678,12 +689,14 @@
 #endif
 
 /**
- * LWIP_VLAN_PCP==1: Enable outgoing VLAN taggning of frames on a per-PCB basis
- * for QoS purposes. With this feature enabled, each PCB has a new variable: "tci".
- * (Tag Control Identifier). The TCI contains three fields: VID, CFI and PCP.
- * VID is the VLAN ID, which should be set to zero.
- * The "CFI" bit is used to enable or disable VLAN tags for the PCB.
- * PCP (Priority Code Point) is a 3 bit field used for Ethernet level QoS.
+ * LWIP_VLAN_PCP==1: Enable outgoing VLAN tagging of frames on a per-PCB basis
+ * for QoS purposes. With this feature enabled, each PCB has a new variable:
+ * "netif_hints.tci" (Tag Control Identifier).
+ * The TCI contains three fields: VID, CFI and PCP.
+ * - VID is the VLAN ID, which should be set to zero.
+ * - The "CFI" bit is used to enable or disable VLAN tags for the PCB.
+ * - PCP (Priority Code Point) is a 3 bit field used for Ethernet level QoS.
+ * See pcb_tci_*() functions to get/set/clear this.
  */
 #ifndef LWIP_VLAN_PCP
 #define LWIP_VLAN_PCP                   0
@@ -973,6 +986,14 @@
 #if !defined LWIP_DHCP_MAX_DNS_SERVERS || defined __DOXYGEN__
 #define LWIP_DHCP_MAX_DNS_SERVERS       DNS_MAX_SERVERS
 #endif
+
+/** LWIP_DHCP_DISCOVER_ADD_HOSTNAME: Set to 0 to not include hostname opt in discover packets.
+ * If the hostname is not set in the DISCOVER packet, then some servers might issue an OFFER with hostname
+ * configured and consequently reject the REQUEST with any other hostname.
+ */
+#if !defined LWIP_DHCP_DISCOVER_ADD_HOSTNAME || defined __DOXYGEN__
+#define LWIP_DHCP_DISCOVER_ADD_HOSTNAME 1
+#endif /* LWIP_DHCP_DISCOVER_ADD_HOSTNAME */
 /**
  * @}
  */
@@ -1344,6 +1365,15 @@
 #define TCP_CALCULATE_EFF_SEND_MSS      1
 #endif
 
+/**
+ * LWIP_TCP_RTO_TIME: Initial TCP retransmission timeout (ms).
+ * This defaults to 3 seconds as traditionally defined in the TCP protocol.
+ * For improving timely recovery on faster networks, this value could
+ * be lowered down to 1 second (RFC 6298)
+ */
+#if !defined LWIP_TCP_RTO_TIME || defined __DOXYGEN__
+#define LWIP_TCP_RTO_TIME               3000
+#endif
 
 /**
  * TCP_SND_BUF: TCP sender buffer space (bytes).
@@ -1584,7 +1614,7 @@
  * TCP_MSS, IP header, and link header.
  */
 #if !defined PBUF_POOL_BUFSIZE || defined __DOXYGEN__
-#define PBUF_POOL_BUFSIZE               LWIP_MEM_ALIGN_SIZE(TCP_MSS+40+PBUF_LINK_ENCAPSULATION_HLEN+PBUF_LINK_HLEN)
+#define PBUF_POOL_BUFSIZE               LWIP_MEM_ALIGN_SIZE(TCP_MSS+PBUF_IP_HLEN+PBUF_TRANSPORT_HLEN+PBUF_LINK_ENCAPSULATION_HLEN+PBUF_LINK_HLEN)
 #endif
 
 /**
@@ -1598,10 +1628,22 @@
 /**
  * LWIP_PBUF_CUSTOM_DATA: Store private data on pbufs (e.g. timestamps)
  * This extends struct pbuf so user can store custom data on every pbuf.
+ * e.g.:
+ *  \#define LWIP_PBUF_CUSTOM_DATA   u32_t myref;
  */
 #if !defined LWIP_PBUF_CUSTOM_DATA || defined __DOXYGEN__
 #define LWIP_PBUF_CUSTOM_DATA
 #endif
+
+/**
+ * LWIP_PBUF_CUSTOM_DATA_INIT: Initialize private data on pbufs.
+ * e.g. for the above example definition:
+ *  \#define LWIP_PBUF_CUSTOM_DATA(p) (p)->myref = 0
+ */
+#if !defined LWIP_PBUF_CUSTOM_DATA_INIT || defined __DOXYGEN__
+#define LWIP_PBUF_CUSTOM_DATA_INIT(p)
+#endif
+
 /**
  * @}
  */
@@ -2226,7 +2268,7 @@
  * MEM_STATS==1: Enable mem.c stats.
  */
 #if !defined MEM_STATS || defined __DOXYGEN__
-#define MEM_STATS                       ((MEM_LIBC_MALLOC == 0) && (MEM_USE_POOLS == 0))
+#define MEM_STATS                       ((MEM_CUSTOM_ALLOCATOR == 0) && (MEM_USE_POOLS == 0))
 #endif
 
 /**
@@ -2501,7 +2543,7 @@
  * network startup.
  */
 #if !defined LWIP_IPV6_SEND_ROUTER_SOLICIT || defined __DOXYGEN__
-#define LWIP_IPV6_SEND_ROUTER_SOLICIT   1
+#define LWIP_IPV6_SEND_ROUTER_SOLICIT   LWIP_IPV6
 #endif
 
 /**
@@ -2546,10 +2588,12 @@
 
 /**
  * LWIP_ICMP6_DATASIZE: bytes from original packet to send back in
- * ICMPv6 error messages.
+ * ICMPv6 error messages (0 = default of IP6_MIN_MTU_LENGTH)
+ * ATTENTION: RFC4443 section 2.4 says IP6_MIN_MTU_LENGTH is a MUST,
+ * so override this only if you absolutely have to!
  */
 #if !defined LWIP_ICMP6_DATASIZE || defined __DOXYGEN__
-#define LWIP_ICMP6_DATASIZE             8
+#define LWIP_ICMP6_DATASIZE             0
 #endif
 
 /**
@@ -2839,7 +2883,7 @@
  *         the first 'opt1len' bytes and the rest starts at 'opt2'. opt2len can
  *         be simply calculated: 'opt2len = optlen - opt1len;'
  * - p: input packet, p->payload points to application data (that's why tcp hdr
- *      and options are passed in seperately)
+ *      and options are passed in separately)
  * Return value:
  * - ERR_OK: continue input of this packet as normal
  * - != ERR_OK: drop this packet for input (don't continue input processing)

@@ -40,7 +40,7 @@
 
 /*
  * Include user defined options first. Anything not defined in these files
- * will be set to standard values. Override anything you dont like!
+ * will be set to standard values. Override anything you don't like!
  */
 #include "lwipopts.h"
 #include "lwip/debug.h"
@@ -109,7 +109,7 @@
 #define MEMP_NUM_UDP_PCB                4
 
 /**
- * MEMP_NUM_TCP_PCB: the number of simulatenously active TCP connections.
+ * MEMP_NUM_TCP_PCB: the number of simultaneously active TCP connections.
  * (requires the LWIP_TCP option)
  */
 #define MEMP_NUM_TCP_PCB                4
@@ -133,7 +133,7 @@
 #define MEMP_NUM_REASSDATA              1
 
 /**
- * MEMP_NUM_ARP_QUEUE: the number of simulateously queued outgoing
+ * MEMP_NUM_ARP_QUEUE: the number of simultaneously queued outgoing
  * packets (pbufs) that are waiting for an ARP request (to resolve
  * their destination address) to finish.
  * (requires the ARP_QUEUEING option)
@@ -141,7 +141,7 @@
 #define MEMP_NUM_ARP_QUEUE              2
 
 /**
- * MEMP_NUM_SYS_TIMEOUT: the number of simulateously active timeouts.
+ * MEMP_NUM_SYS_TIMEOUT: the number of simultaneously active timeouts.
  * (requires NO_SYS==0)
  */
 #define MEMP_NUM_SYS_TIMEOUT            8
@@ -238,7 +238,7 @@
 /**
  * IP_FRAG_USES_STATIC_BUF==1: Use a static MTU-sized buffer for IP
  * fragmentation. Otherwise pbufs are allocated and reference the original
-    * packet data to be fragmented.
+ * packet data to be fragmented.
 */
 #define IP_FRAG_USES_STATIC_BUF         0
 
@@ -341,7 +341,7 @@
  */
 #define LWIP_TCP                        1
 
-#define LWIP_LISTEN_BACKLOG             0
+#define TCP_LISTEN_BACKLOG              0
 
 /*
    ----------------------------------
@@ -357,9 +357,8 @@
 
 /**
  * PBUF_POOL_BUFSIZE: the size of each pbuf in the pbuf pool. The default is
- * designed to accomodate single full size TCP frame in one pbuf, including
+ * designed to accommodate single full size TCP frame in one pbuf, including
  * TCP_MSS, IP header, and link header.
-*
  */
 #define PBUF_POOL_BUFSIZE               LWIP_MEM_ALIGN_SIZE(TCP_MSS+40+PBUF_LINK_HLEN)
 
@@ -431,15 +430,6 @@
 #if !NO_SYS
 void sys_check_core_locking(void);
 #define LWIP_ASSERT_CORE_LOCKED()  sys_check_core_locking()
-void sys_mark_tcpip_thread(void);
-#define LWIP_MARK_TCPIP_THREAD()   sys_mark_tcpip_thread()
-
-#if LWIP_TCPIP_CORE_LOCKING
-void sys_lock_tcpip_core(void);
-#define LOCK_TCPIP_CORE()          sys_lock_tcpip_core()
-void sys_unlock_tcpip_core(void);
-#define UNLOCK_TCPIP_CORE()        sys_unlock_tcpip_core()
-#endif
 #endif
 
 #endif /* LWIP_LWIPOPTS_H */

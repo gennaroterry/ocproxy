@@ -50,13 +50,11 @@ extern "C" {
 #include "lwip/err.h"
 #include "lwip/apps/snmp_core.h"
 
-/** SNMP variable binding descriptor (publically needed for traps) */
+/** SNMP variable binding descriptor (publicly needed for traps) */
 struct snmp_varbind
 {
   /** pointer to next varbind, NULL for last in list */
   struct snmp_varbind *next;
-  /** pointer to previous varbind, NULL for first in list */
-  struct snmp_varbind *prev;
 
   /** object identifier */
   struct snmp_obj_id oid;

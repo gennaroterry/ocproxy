@@ -3,6 +3,10 @@
 
 #include "lwip/sys.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /** How many bytes in fifo */
 #define FIFOSIZE 2048
 
@@ -15,7 +19,7 @@ typedef struct fifo_t {
 
   sys_sem_t sem;		/* semaphore protecting simultaneous data manipulation */
   sys_sem_t getSem;		/* sepaphore used to signal new data if getWaiting is set */
-  u8_t getWaiting;		/* flag used to indicate that fifoget is waiting for data. fifoput is suposed to clear */
+  u8_t getWaiting;		/* flag used to indicate that fifoget is waiting for data. fifoput is supposed to clear */
   						/* this flag prior to signaling the getSem semaphore */
 } fifo_t;
 
@@ -49,6 +53,10 @@ void fifoPut(fifo_t * fifo, int fd);
 *	@param 	fifo	pointer to fifo data structure, allocated by the user
 */
 void fifoInit(fifo_t * fifo);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
 

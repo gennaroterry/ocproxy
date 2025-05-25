@@ -133,7 +133,7 @@ altcp_proxyconnect_send_request(struct altcp_pcb *conn)
     /* overflow */
     return ERR_MEM;
   }
-  /* Allocate a bufer for the request string */
+  /* Allocate a buffer for the request string */
   buffer = (char *)mem_malloc(alloc_len);
   if (buffer == NULL) {
     return ERR_MEM;
@@ -576,6 +576,10 @@ const struct altcp_functions altcp_proxyconnect_functions = {
   altcp_default_get_tcp_addrinfo,
   altcp_default_get_ip,
   altcp_default_get_port
+#if LWIP_TCP_KEEPALIVE
+  , altcp_default_keepalive_disable
+  , altcp_default_keepalive_enable
+#endif
 #ifdef LWIP_DEBUG
   , altcp_default_dbg_get_tcp_state
 #endif

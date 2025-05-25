@@ -318,7 +318,7 @@ mqtt_append_request(struct mqtt_request_t **tail, struct mqtt_request_t *r)
 
   LWIP_ASSERT("mqtt_append_request: tail != NULL", tail != NULL);
 
-  /* Iterate trough queue to find head, and count total timeout time */
+  /* Iterate through queue to find head, and count total timeout time */
   for (iter = *tail; iter != NULL; iter = iter->next) {
     time_before += iter->timeout_diff;
     head = iter;
@@ -652,7 +652,7 @@ pub_ack_rec_rel_response(mqtt_client_t *client, u8_t msg, u16_t pkt_id, u8_t qos
  * @param result Result code from server
  */
 static void
-mqtt_incomming_suback(struct mqtt_request_t *r, u8_t result)
+mqtt_incoming_suback(struct mqtt_request_t *r, u8_t result)
 {
   if (r->cb != NULL) {
     r->cb(r->arg, result < 3 ? ERR_OK : ERR_ABRT);
@@ -695,7 +695,7 @@ mqtt_message_received(mqtt_client_t *client, u8_t fixed_hdr_len, u16_t length, u
         client->cyclic_tick = 0;
         client->conn_state = MQTT_CONNECTED;
         /* Notify upper layer */
-        if (client->connect_cb != 0) {
+        if (client->connect_cb != NULL) {
           client->connect_cb(client, client->connect_arg, res);
         }
       }
@@ -757,7 +757,7 @@ mqtt_message_received(mqtt_client_t *client, u8_t fixed_hdr_len, u16_t length, u
       payload_length = length - after_topic;
       payload_offset = after_topic;
 
-      LWIP_DEBUGF(MQTT_DEBUG_TRACE, ("mqtt_incomming_publish: Received message with QoS %d at topic: %s, payload length %"U32_F"\n",
+      LWIP_DEBUGF(MQTT_DEBUG_TRACE, ("mqtt_incoming_publish: Received message with QoS %d at topic: %s, payload length %"U32_F"\n",
                                      qos, topic, remaining_length + payload_length));
       if (client->pub_cb != NULL) {
         client->pub_cb(client->inpub_arg, (const char *)topic, remaining_length + payload_length);
@@ -770,12 +770,14 @@ mqtt_message_received(mqtt_client_t *client, u8_t fixed_hdr_len, u16_t length, u
         LWIP_DEBUGF(MQTT_DEBUG_WARN,( "mqtt_message_received: Received short packet (payload)\n"));
         goto out_disconnect;
       }
-      client->data_cb(client->inpub_arg, var_hdr_payload + payload_offset, payload_length, remaining_length == 0 ? MQTT_DATA_FLAG_LAST : 0);
+      if (client->data_cb != NULL) {
+        client->data_cb(client->inpub_arg, var_hdr_payload + payload_offset, payload_length, remaining_length == 0 ? MQTT_DATA_FLAG_LAST : 0);
+      }
       /* Reply if QoS > 0 */
       if (remaining_length == 0 && qos > 0) {
         /* Send PUBACK for QoS 1 or PUBREC for QoS 2 */
         u8_t resp_msg = (qos == 1) ? MQTT_MSG_TYPE_PUBACK : MQTT_MSG_TYPE_PUBREC;
-        LWIP_DEBUGF(MQTT_DEBUG_TRACE, ("mqtt_incomming_publish: Sending publish response: %s with pkt_id: %d\n",
+        LWIP_DEBUGF(MQTT_DEBUG_TRACE, ("mqtt_incoming_publish: Sending publish response: %s with pkt_id: %d\n",
                                        mqtt_msg_type_to_str(resp_msg), client->inpub_pkt_id));
         pub_ack_rec_rel_response(client, resp_msg, client->inpub_pkt_id, 0);
       }
@@ -810,7 +812,7 @@ mqtt_message_received(mqtt_client_t *client, u8_t fixed_hdr_len, u16_t length, u
             LWIP_DEBUGF(MQTT_DEBUG_WARN, ("mqtt_message_received: To small SUBACK packet\n"));
             goto out_disconnect;
           } else {
-            mqtt_incomming_suback(r, var_hdr_payload[2]);
+            mqtt_incoming_suback(r, var_hdr_payload[2]);
           }
         } else if (r->cb != NULL) {
           r->cb(r->arg, ERR_OK);
@@ -1018,7 +1020,7 @@ mqtt_tcp_err_cb(void *arg, err_t err)
   LWIP_DEBUGF(MQTT_DEBUG_TRACE, ("mqtt_tcp_err_cb: TCP error callback: error %d, arg: %p\n", err, arg));
   LWIP_ASSERT("mqtt_tcp_err_cb: client != NULL", client != NULL);
   /* Set conn to null before calling close as pcb is already deallocated*/
-  client->conn = 0;
+  client->conn = NULL;
   mqtt_close(client, MQTT_CONNECT_DISCONNECTED);
 }
 
@@ -1169,7 +1171,7 @@ mqtt_publish(mqtt_client_t *client, const char *topic, const void *payload, u16_
  * @param client MQTT client
  * @param topic topic to subscribe to
  * @param qos Quality of service, 0 1 or 2 (only used for subscribe)
- * @param cb Callback to call when subscribe/unsubscribe reponse is received
+ * @param cb Callback to call when subscribe/unsubscribe response is received
  * @param arg User supplied argument to publish callback
  * @param sub 1 for subscribe, 0 for unsubscribe
  * @return ERR_OK if successful, @see err_t enum for other results
@@ -1295,6 +1297,9 @@ mqtt_client_connect(mqtt_client_t *client, const ip_addr_t *ip_addr, u16_t port,
   u16_t remaining_length = 2 + 4 + 1 + 1 + 2;
   u8_t flags = 0, will_topic_len = 0, will_msg_len = 0;
   u16_t client_user_len = 0, client_pass_len = 0;
+  mqtt_incoming_data_cb_t data_cb;
+  mqtt_incoming_publish_cb_t pub_cb;
+  void *inpub_arg;
 
   LWIP_ASSERT_CORE_LOCKED();
   LWIP_ASSERT("mqtt_client_connect: client != NULL", client != NULL);
@@ -1307,8 +1312,15 @@ mqtt_client_connect(mqtt_client_t *client, const ip_addr_t *ip_addr, u16_t port,
     return ERR_ISCONN;
   }
 
-  /* Wipe clean */
+  /* Wipe clean, but keep callbacks */
+  data_cb = client->data_cb;
+  pub_cb = client->pub_cb;
+  inpub_arg = client->inpub_arg;
   memset(client, 0, sizeof(mqtt_client_t));
+  client->data_cb = data_cb;
+  client->pub_cb = pub_cb;
+  client->inpub_arg = inpub_arg;
+
   client->connect_arg = arg;
   client->connect_cb = cb;
   client->keep_alive = client_info->keep_alive;
@@ -1325,9 +1337,16 @@ mqtt_client_connect(mqtt_client_t *client, const ip_addr_t *ip_addr, u16_t port,
     LWIP_ERROR("mqtt_client_connect: client_info->will_topic length overflow", len <= 0xFF, return ERR_VAL);
     LWIP_ERROR("mqtt_client_connect: client_info->will_topic length must be > 0", len > 0, return ERR_VAL);
     will_topic_len = (u8_t)len;
-    len = strlen(client_info->will_msg);
-    LWIP_ERROR("mqtt_client_connect: client_info->will_msg length overflow", len <= 0xFF, return ERR_VAL);
-    will_msg_len = (u8_t)len;
+    if (client_info->will_msg_len == 0)
+    {
+        len = strlen(client_info->will_msg);
+        LWIP_ERROR("mqtt_client_connect: client_info->will_msg length overflow", len <= 0xFF, return ERR_VAL);
+        will_msg_len = (u8_t)len;
+    }
+    else
+    {
+        will_msg_len = client_info->will_msg_len;
+    }
     len = remaining_length + 2 + will_topic_len + 2 + will_msg_len;
     LWIP_ERROR("mqtt_client_connect: remaining_length overflow", len <= 0xFFFF, return ERR_VAL);
     remaining_length = (u16_t)len;
